@@ -1,0 +1,8 @@
+.vscode
+__pycache__
+*.pth
+*.pt
+*.h5
+参考
+img
+test_data
