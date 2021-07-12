@@ -1,8 +1,9 @@
-from torch.utils.data import Dataset
-import os
 import logging
+import os
+
 import pandas as pd
 from PIL import Image
+from torch.utils.data import Dataset
 from torchvision import transforms
 
 __all__ = ['faceDataset']
@@ -15,6 +16,7 @@ class faceDataset(Dataset):
             self.data_path = os.path.join(dataset_path, '面诊')
         else:
             logger.error('Dataset has no face modality.')
+            raise FileNotFoundError # TODO: define custom exception
         with open(os.path.join(self.data_path, 'labels.csv'), 'r') as f:
             self.labels = pd.read_csv(f)
         self.img_path = os.path.join(self.data_path, 'raw') # TODO: change 'raw' to 'processed'

@@ -5,7 +5,7 @@
 
 __ALL__ = ["PulseCondition"]
 
-class PulseCondition():
+class pulseCondition():
     def __init__(self):
         pass
 

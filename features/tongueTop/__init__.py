@@ -1,7 +1,8 @@
-from .CoatingColor import CoatingColor
-from .TongueCrack import TongueCrack
-from .TongueColor import TongueColor
-from .TongueSeg import TongueSeg
-from .TongueThickness import TongueThickness
-from .TongueWidth import TongueWidth
-from .ToothMark import ToothMark
+from .tongueColor import tongueColor
+from .tongueCrack import tongueCrack
+from .tongueSeg import tongueSeg
+from .tongueThickness import tongueThickness
+from .tongueWidth import tongueWidth
+from .toothMark import toothMark
+
+from .top import tongueTopFeature

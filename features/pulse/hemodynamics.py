@@ -1,74 +1,101 @@
 """
 作者：尹从峰&赵少杰
 功能：血液动力学参数检测
+方法：传统计算
 """
-import pywt 
 import json
+import os
+import logging
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from scipy.fftpack import fft
+import pywt
 from scipy import interpolate
+from scipy.fftpack import fft
+from torch.serialization import save
+
 __ALL__ = ["Hemodynamics"]
 
-class Hemodynamics():
-    def do(self, src_path, dst_path=None):
+logger = logging.getLogger()
+
+class hemodynamics():
+    def get(self, src_path, dst_path=None):
         """
         function:
-            单个文件血液动力学参数检测
+            单个文件血液动力学参数检测，支持单通道和6通道数据
         parameters:
             src_path: 脉诊文件路径（txt）
             dst_path: 结果保存路径，若为空，则不保存（保存成json文件）
         return:
             res: 结果数据，返回字典
         """
-        self.src_path = src_path
-        self.init()
-        assert self.data_id in ['beijing', 'shanghai'], 'Unidentified Data Type!'
-        raw_data = self.read_data()
+        try:
+            self.src_path = src_path
+            self.dst_path = dst_path
+            save_intermediate_res = False if self.dst_path is None else True
+            self.init()
+            assert self.data_id in ['beijing', 'shanghai'], 'Unidentified Data Type!'
+            raw_data = self.read_data()
+            if save_intermediate_res:
+                self.plot(raw_data, 'raw_data.png')
+            cutoff = int(len(raw_data) / 1000) * 1000
+        except Exception as e:
+            logger.error("An error occured while reading pulse data: ", e)
+            return {}
         
-        if self.data_id=='beijing':
-            norm_data = self.normalization(raw_data)
-            avg_period_chs, period_feature_chs = [], []
-            hemo_feature_chs = []
-            for ch in norm_data.transpose():
-                denoised_data = self.__denoise(ch)
+        try:
+            if self.data_id=='beijing':
+                norm_data = self.normalization(raw_data)
+                avg_period_chs, period_feature_chs = [], []
+                hemo_feature_chs = []
+                processed_data = []
+                for ch in norm_data.transpose():
+                    denoised_data = self.__denoise(ch[:cutoff])
+                    drift_removed_data = self.__remove_drift(denoised_data)
+                    processed_data.append(drift_removed_data)
+                    period_set = self.get_periods(drift_removed_data)
+                    avg_period = self.get_average_period(period_set)
+                    period_feature = self.cal_period_feature(avg_period)
+                    hemo_feature = self.cal_hemo_feature(avg_period)
+
+                    avg_period_chs.append(list(avg_period))
+                    period_feature_chs.append(period_feature)
+                    hemo_feature_chs.append(hemo_feature)
+
+                processed_data = np.asarray(processed_data)
+                res = {'avg_period': avg_period_chs,
+                    'period_feature': period_feature_chs,
+                    'hemo_feature': hemo_feature_chs}
+
+            elif self.data_id=='shanghai':
+                norm_data = self.normalization(raw_data)
+                denoised_data = self.__denoise(norm_data[:cutoff])
                 drift_removed_data = self.__remove_drift(denoised_data)
+                processed_data = drift_removed_data
                 period_set = self.get_periods(drift_removed_data)
                 avg_period = self.get_average_period(period_set)
                 period_feature = self.cal_period_feature(avg_period)
                 hemo_feature = self.cal_hemo_feature(avg_period)
+                res = {'avg_period' : list(avg_period),
+                    'period_feature' : period_feature,
+                    'hemo_feaure': hemo_feature}
 
-                avg_period_chs.append(avg_period)
-                period_feature_chs.append(period_feature)
-                hemo_feature_chs.append(hemo_feature)
-            
-            res = {'avg_period': avg_period_chs,
-                   'period_feature': period_feature_chs,
-                   'hemo_feature': hemo_feature_chs}
-
-        elif self.data_id=='shanghai':
-            norm_data = self.normalization(raw_data)
-            denoised_data = self.__denoise(norm_data)
-            drift_removed_data = self.__remove_drift(denoised_data)
-            period_set = self.get_periods(drift_removed_data)
-            avg_period = self.get_average_period(period_set)
-            period_feature = self.cal_period_feature(avg_period)
-            hemo_feature = self.cal_hemo_feature(avg_period)
-            res = {'avg_period' : avg_period,
-                   'period_feature' : period_feature,
-                   'hemo_feaure': hemo_feature}
-
-        if dst_path is not None:
-            with open(dst_path, 'w') as f:
-                json.dump(res, f)
-        return res
+            if save_intermediate_res:
+                self.plot(processed_data, 'processed_data.png')
+                with open(os.path.join(self.dst_path, 'hemo.json'), 'w') as f:
+                    json.dump(res, f)
+            return res
+        
+        except Exception as e:
+            logger.error("An error occured while extracting pulse features: ", e)
+            return {}
 
 
     def init(self):
         # 判断数据类别
         # 北京数据6个通道，上海数据1个通道
-        # 北京数据文件前6行、上海数据前一行是无关信息
+        # 北京数据文件前4或6行、上海数据前1或2行是无关信息
         with open(self.src_path, 'rb') as f:
             lines = f.readlines()
             n = len(lines[-1].split())
@@ -86,10 +113,10 @@ class Hemodynamics():
             lines = f.readlines()
             if self.data_id == 'beijing':
                 for line in lines[6:]:
-                    ch = [float(i) for i in lines.split()]
+                    ch = [float(i) for i in line.split()]
                     data.append(ch)
             else:
-                for line in lines[1:]:
+                for line in lines[2:]:
                     data.append(float(line))
         return np.array(data)
         
@@ -107,7 +134,7 @@ class Hemodynamics():
         return norm_data
 
 
-    def show(self, data):
+    def plot(self, data, save_name):
         if self.data_id == 'beijing':
             fig, axes = plt.subplots(2, 3, figsize=(13, 6))
             _max, _min = self.__get_extreme(data)
@@ -122,7 +149,7 @@ class Hemodynamics():
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(data)
 
-        plt.show()
+        plt.savefig(os.path.join(self.dst_path, save_name))
 
 
     def __get_extreme(self, data):
@@ -179,7 +206,7 @@ class Hemodynamics():
         return denoised_ch
 
 
-    def __remove_drift(self, data, show_keypoints=True, show_contrast=True):
+    def __remove_drift(self, data, show_keypoints=False, show_contrast=False):
         '''
         func:
             对去除噪声之后的数据处理，去除其中的基准漂移
@@ -209,7 +236,7 @@ class Hemodynamics():
         length = len(data)
         fn = np.argmax(yf[1:int(length/2)]) / len(yf[1:]) * fs
         try:
-            Tn = int(1 / fn * fs)
+            Tn = int(1 / fn * fs) # BUG: 北中医数据出现除0错误
             if Tn > 1200:
                 Tn = 1000 if self.data_id=='beijing' else 800
             elif Tn < 200:
@@ -320,7 +347,7 @@ class Hemodynamics():
             ax.scatter(valley_pos, valley, c='orange')
             ax.plot(drift, f_linear(drift))
             # plt.show()
-            plt.savefig('img/test1.png')
+            plt.savefig(os.path.join(self.dst_path, 'test1.png'))
         if show_contrast:
             fig, ax = plt.subplots(figsize=(10, 6))
             ax.plot(data, label=u'denoised pulse')
@@ -328,11 +355,11 @@ class Hemodynamics():
                     label=u'denoised & remove drift')
             ax.legend(loc='upper right')
             # plt.show()
-            plt.savefig('img/test2.png')
+            plt.savefig(os.path.join(self.dst_path, 'test2.png'))
         data = data - f_linear(drift)
         return data
     
-    def __period_seg(self, data, show_onsets=True):
+    def __period_seg(self, data, show_onsets=False):
         '''
         func:
             对去除漂移之后的数据处理，提取出其中的关键周期
@@ -464,10 +491,10 @@ class Hemodynamics():
             ax.scatter(peak_pos, data[peak_pos], c='y')
             ax.scatter(valley_pos, valley, c='r')
             # plt.show()
-            plt.savefig('img/test3.jpg')
+            plt.savefig(os.path.join(self.dst_path, 'test3.png'))
         return valley_pos
 
-    def get_periods(self, data):
+    def get_periods(self, data, plot=False):
         '''
         func:
             从预处理之后的数据中提取出完整的周期
@@ -476,7 +503,7 @@ class Hemodynamics():
         return:
             pulse_set: 从中提取到的单个周期数据组成的列表
         '''
-        onsets = self.__period_seg(data)
+        onsets = self.__period_seg(data, plot)
         pulse_set = []
         length_set = []
         peak_set = []
@@ -511,10 +538,10 @@ class Hemodynamics():
             peak_pos.append(np.argmax(pulse))
         mean = np.mean(peak_pos)
         for idx, pos in enumerate(peak_pos):
-            if abs(pos - mean) > 20:
+            if abs(pos - mean) > 50: # 考虑在这里放宽限制，避免全部剔除，原始值为20
                 del_idx.append(idx)
         pulse_set = np.delete(pulse_set, del_idx)
-        return pulse_set
+        return pulse_set # BUG: 会出现全部剔除后返回空值的情况
 
     def get_average_period(self, periods):
         '''

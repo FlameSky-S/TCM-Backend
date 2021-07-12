@@ -15,7 +15,7 @@ from torchvision import transforms
 
 from data.dataset.features.face import faceDataset
 
-__all__ = ['AreaSeg']
+# __all__ = ['AreaSeg']
 
 class VGGBlock(nn.Module):
     def __init__(self, in_channels, middle_channels, out_channels):
@@ -184,7 +184,7 @@ class DiceLoss(nn.Module):
 
 class AreaSeg():
     def __init__(self,
-                is_train=False,
+                # is_train=False,
                 dataset_path="",
                 gpu_device_id=0,
                 use_pretrained=True,
@@ -197,19 +197,18 @@ class AreaSeg():
         use_pretrained: 是否加载预训练模型
         pretrained_path: 预训练模型路径
         """
-        self.device = torch.device(f'cuda:{self.gpu_id}' if torch.cuda.is_available() and gpu_device_id > 0 else 'cpu')
+        self.device = torch.device(f'cuda:{gpu_device_id}' if torch.cuda.is_available() and gpu_device_id > 0 else 'cpu')
         self.model = NestedUNet(num_classes=15, input_channels=3)
         
         if use_pretrained:
-            # detect the pretrained path
             try:
-                self.pretrained_path = glob('pretrained/features/face/area_seg-*.pth')[0] if pretrained_path == "Default" else pretrained_path
+                self.pretrained_path = glob.glob('pretrained/features/face/area_seg-*.pth')[0] if pretrained_path == "Default" else pretrained_path
                 assert os.path.exists(self.pretrained_path)
             except:
-                raise ValueError("(default) pretrained_path is invalid!")
+                raise ValueError("Invalid pretrained_path.")
             try:
                 # load pretrained parameters
-                self.model.load_state_dict(torch.dict(self.pretrained_path))
+                self.model.load_state_dict(torch.load(self.pretrained_path))
             except:
                 # load the whole model
                 self.model = torch.load(self.pretrained_path)
@@ -217,20 +216,21 @@ class AreaSeg():
         self.model.to(self.device)
         # 可考虑在这里加一些数据增强方法(要同时考虑标签的转换)
         self.transform = transforms.Compose([
-            transforms.Resize([512, 512]),
+            # transforms.Resize([512, 512]),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])]
+            # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ]
         )
-        self.is_train = is_train
-        self.num_classes = num_classes
-        if self.is_train:
+        # self.is_train = is_train
+        # self.num_classes = num_classes
+        # if self.is_train:
             # 定义损失函数
-            self.loss_func = DiceLoss()
+            # self.loss_func = DiceLoss()
             # 创建数据集
             # TODO: 定义dataloader迭代器根据tongueTopDataloader类和标准化的数据集格式
-            self.dataset = faceDataset(dataset_path, self.transform)
+            # self.dataset = faceDataset(dataset_path, self.transform)
             # batch_size = 64
-            pass
+            # pass
     
     def __metrics(self, y_pred, y_true):
         """
@@ -283,31 +283,35 @@ class AreaSeg():
     def do_test(self, img=None):
         """
         img参数仅在self.is_train为True时有效
+        img为PIL image
         """
         self.model.eval()
-        if self.is_train:
-            test_loss=0
-            with torch.no_grad():
-                for data in tqdm(self.test_dataloader):
-                    inputs = data['inputs'].to(self.device)
-                    labels = data['labels'].to(self.device)
-                    batch_size = inputs.size(0)
-                    # 输出
-                    masks_pred = self.model(inputs)
+        # if self.is_train:
+        #     test_loss=0
+        #     with torch.no_grad():
+        #         for data in tqdm(self.test_dataloader):
+        #             inputs = data['inputs'].to(self.device)
+        #             labels = data['labels'].to(self.device)
+        #             batch_size = inputs.size(0)
+        #             # 输出
+        #             masks_pred = self.model(inputs)
 
-                    size_length = masks_pred.size()[2] * masks_pred.size()[3]
-                    mask_p = masks_pred.view(batch_size, self.num_classes, size_length)
-                    mask_t = labels.view(batch_size, self.num_classes, size_length)
-                    #print(output)
-                    loss = self.loss_func.forward(mask_p.float(), mask_t.float())
-                    test_loss += loss.item()
-                test_loss = test_loss / len(self.test_dataloader)
-            return {"prediction": masks_pred, "test_loss": test_loss}
-        else:
-            img = self.transform(img).to(self.device)
-            with torch.no_grad():
-                output = self.model(img)
-            return output.detach().cpu().numpy()
+        #             size_length = masks_pred.size()[2] * masks_pred.size()[3]
+        #             mask_p = masks_pred.view(batch_size, self.num_classes, size_length)
+        #             mask_t = labels.view(batch_size, self.num_classes, size_length)
+        #             #print(output)
+        #             loss = self.loss_func.forward(mask_p.float(), mask_t.float())
+        #             test_loss += loss.item()
+        #         test_loss = test_loss / len(self.test_dataloader)
+        #     return {"prediction": masks_pred, "test_loss": test_loss}
+        # else:
+        img = self.transform(img).to(self.device)
+        # img = img.to(self.device)
+        img = img.unsqueeze(0)
+        with torch.no_grad():
+            output = self.model(img).detach().cpu()
+        mask_pred = torch.squeeze(torch.max(output, 1)[1]).numpy().astype(np.uint8)
+        return mask_pred
 
     def get(self, img):
         """

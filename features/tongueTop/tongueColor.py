@@ -1,6 +1,7 @@
 """
 作者：常然
 功能：舌苔质分离 & 颜色分类
+方法：传统机器学习
 """
 import os
 import glob
@@ -19,7 +20,7 @@ class tongueColor():
     舌苔质分离 & 获取舌苔舌质颜色
     """
     def __init__(self):
-        self.classifier = KMeans(n_clusters=2)
+        self.classifier = KMeans(n_clusters=3)
     
     # def do_train(self, train_x, train_y, classifier):
     #     X = np.load(train_x)
@@ -27,7 +28,11 @@ class tongueColor():
     #     clf = classifier.fit(X, Y)
     #     return clf
 
-    def __cluster(self, img):
+    def cluster(self, img):
+        """
+        分离舌苔舌质
+        img为np array
+        """
         h,w,_ = img.shape
         vec = np.reshape(img,(h*w,3))
         label = self.classifier.fit_predict(vec)
@@ -66,7 +71,7 @@ class tongueColor():
         msk_shetai = mask_shetai*np.ones(mask_shetai.shape)*255
         return msk_shetai, msk_shezhi
     
-    def __getVecFromImage(self, img, msk, outputlen=100):
+    def getVecFromImage(self, img, msk, outputlen=100):
         """
         获取图片msk区域的向量表示，等间隔采样100个点作为代表点
         """
@@ -80,6 +85,7 @@ class tongueColor():
         if length == 0:
             return np.zeros(3*outputlen)
         interval = int(length / outputlen)
+        interval = interval if interval != 0 else 1
         vec = []
         for i in range(length):
             if i % interval == 0:
@@ -87,9 +93,10 @@ class tongueColor():
         vec = np.array(vec)
         tmp = vec
         while len(vec) < outputlen:
-            vec = np.append(vec, tmp)
+            vec = np.append(vec, tmp, axis=0)
         vec = vec[:outputlen]
         vec = np.append(vec[:,0], np.append(vec[:,1],vec[:,2]))
+        # TODO: 考虑返回颜色均值
         return vec
     
     def __getLAB(self, img, msk):
@@ -115,19 +122,19 @@ class tongueColor():
                     "coating_B_value": -1, # B 暂无
                 }
         """
-        shetai_msk, shezhi_msk = self.__cluster(img)
+        shetai_msk, shezhi_msk, _ = self.__cluster(img)
         # 舌苔颜色分类
-        shetai_vec = __getVecFromImage(img, shetai_msk)
+        shetai_vec = self.__getVecFromImage(img, shetai_msk)
         with open(self.shetai_color_clf_path, 'rb') as f:
             clf = pickle.load(f)
             ans_shetai = clf.predict([shetai_vec])
         # 舌质颜色分类
-        shezhi_vec = __getVecFromImage(img, shezhi_msk)
+        shezhi_vec = self.__getVecFromImage(img, shezhi_msk)
         with open(self.shezhi_color_clf_path, 'rb') as f:
             clf = pickle.load(f)
             ans_shezhi = clf.predict([shezhi_vec])
         res = {
-            "tongue_color": ans_shetai[0], # 舌苔颜色
+            "tongue_color": ans_shezhi[0], # 舌质颜色
             "tongue_L_value": 0, # L
             "tongue_A_value": 0, # A
             "tongue_B_value": 0, # B
